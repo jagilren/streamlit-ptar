@@ -11,8 +11,8 @@ def generar_datos() -> pd.DataFrame:
 
     n = len(fechas)
 
-    ph = np.clip(np.random.normal(loc=7.2, scale=0.6, size=n), 6.0, 9.5)
-    dqo = np.clip(np.random.normal(loc=550, scale=180, size=n), 200, 1000)
+    ph = np.clip(np.random.normal(loc=7.2, scale=0.6, size=n), 9.0, 9.5)
+    dqo = np.clip(np.random.normal(loc=550, scale=180, size=n), 300, 1000)
 
     meses = (
         ["Mayo 2026"] * len(fechas_mayo) + ["Junio 2026"] * len(fechas_junio)

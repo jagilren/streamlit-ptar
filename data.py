@@ -7,7 +7,7 @@ def generar_datos() -> pd.DataFrame:
 
     fechas_mayo = pd.date_range("2026-05-01", "2026-05-31", freq="D")
     fechas_junio = pd.date_range("2026-06-01", "2026-06-30", freq="D")
-    fechas = fechas_mayo.append(fechas_junio)
+    fechas = pd.DatetimeIndex(list(fechas_mayo) + list(fechas_junio))
 
     n = len(fechas)
 

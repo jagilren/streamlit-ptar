@@ -2,27 +2,37 @@ import pandas as pd
 import numpy as np
 
 
-def generar_datos() -> pd.DataFrame:
+def generar_datos() -> tuple[pd.DataFrame, pd.DataFrame]:
     np.random.seed(42)
 
-    fechas_mayo = pd.date_range("2026-05-01", "2026-05-31", freq="D")
+    # ── pH: 48 mediciones/día (cada 30 min) ──────────────────────────────
+    fechas_ph = pd.date_range("2026-05-01", "2026-06-30 23:30", freq="30min")
+    n_ph = len(fechas_ph)
+
+    ph_serpetin_daf = np.clip(np.random.normal(loc=7.0, scale=0.9, size=n_ph), 4.0, 11.0)
+    ph_vertimiento  = np.clip(np.random.normal(loc=7.2, scale=0.8, size=n_ph), 4.0, 11.0)
+
+    df_ph = pd.DataFrame({
+        "fecha_hora":      fechas_ph,
+        "pH_serpetin_daf": ph_serpetin_daf.round(2),
+        "pH_vertimiento":  ph_vertimiento.round(2),
+        "mes": np.where(fechas_ph < pd.Timestamp("2026-06-01"), "Mayo 2026", "Junio 2026"),
+    })
+
+    # ── DQO: 1 medición/día ───────────────────────────────────────────────
+    fechas_mayo  = pd.date_range("2026-05-01", "2026-05-31", freq="D")
     fechas_junio = pd.date_range("2026-06-01", "2026-06-30", freq="D")
-    fechas = pd.DatetimeIndex(list(fechas_mayo) + list(fechas_junio))
+    fechas_dqo   = pd.DatetimeIndex(list(fechas_mayo) + list(fechas_junio))
+    n_dqo        = len(fechas_dqo)
 
-    n = len(fechas)
+    dqo_reactor     = np.clip(np.random.normal(loc=570, scale=160, size=n_dqo), 300, 950)
+    dqo_vertimiento = np.clip(np.random.normal(loc=400, scale=140, size=n_dqo), 180, 780)
 
-    ph = np.clip(np.random.normal(loc=7.2, scale=0.6, size=n), 9.0, 9.5)
-    dqo = np.clip(np.random.normal(loc=550, scale=180, size=n), 300, 1000)
+    df_dqo = pd.DataFrame({
+        "fecha":           fechas_dqo,
+        "DQO_reactor_bio": dqo_reactor.round(1),
+        "DQO_vertimiento": dqo_vertimiento.round(1),
+        "mes": ["Mayo 2026"] * len(fechas_mayo) + ["Junio 2026"] * len(fechas_junio),
+    })
 
-    meses = (
-        ["Mayo 2026"] * len(fechas_mayo) + ["Junio 2026"] * len(fechas_junio)
-    )
-
-    return pd.DataFrame(
-        {
-            "fecha": fechas,
-            "pH": ph.round(2),
-            "DQO_mg_L": dqo.round(1),
-            "mes": meses,
-        }
-    )
+    return df_ph, df_dqo

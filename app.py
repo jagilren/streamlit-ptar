@@ -1,5 +1,6 @@
 import streamlit as st
 import plotly.graph_objects as go
+from datetime import datetime
 
 from data import generar_datos
 
@@ -9,14 +10,30 @@ st.set_page_config(
     layout="wide",
 )
 
-PH_MIN     = 6.0
-PH_MAX     = 9.0
-DQO_LIMITE = 700.0  # Resolución 0631/2015
+PH_MIN = 6.0
+PH_MAX = 9.0
 
-COLOR_REACTOR = "#7C4DFF"  # violeta — Reactor biológico
-COLOR_VERT    = "#FF5722"  # naranja-rojo — DQO Vertimiento
-COLOR_PH_DAF  = "#00ACC1"  # cian — pH Serpentín DAF
-COLOR_PH_VERT = "#43A047"  # verde — pH Vertimiento
+COLOR_REACTOR = "#7C4DFF"
+COLOR_VERT    = "#FF5722"
+COLOR_PH_DAF  = "#00ACC1"
+COLOR_PH_VERT = "#43A047"
+
+SERIES_DQO = {
+    "DQO_reactor_bio": {
+        "label":  "Reactor Biológico",
+        "color":  COLOR_REACTOR,
+        "limite": None,
+        "norma":  None,
+        "bg_exc": "#EDE7F6",
+    },
+    "DQO_vertimiento": {
+        "label":  "Vertimiento",
+        "color":  COLOR_VERT,
+        "limite": 700.0,
+        "norma":  "Res. 0631/2015",
+        "bg_exc": "#FFCDD2",
+    },
+}
 
 st.title("💧 Dashboard PTAR — pH y DQO")
 st.markdown("Monitoreo de parámetros de calidad de agua · 2026")
@@ -24,12 +41,35 @@ st.divider()
 
 df_ph, df_dqo = generar_datos()
 
+_MESES_ES = {
+    1: "Enero", 2: "Febrero", 3: "Marzo", 4: "Abril",
+    5: "Mayo", 6: "Junio", 7: "Julio", 8: "Agosto",
+    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
+}
+_OPCIONES_MES = ["Todos", "Mayo 2026", "Junio 2026"]
+_ahora = datetime.now()
+_mes_actual = f"{_MESES_ES[_ahora.month]} {_ahora.year}"
+_idx_default = _OPCIONES_MES.index(_mes_actual) if _mes_actual in _OPCIONES_MES else 0
+
 with st.sidebar:
     st.header("Filtros")
-    mes_sel = st.selectbox("Mes", ["Todos", "Mayo 2026", "Junio 2026"])
+    mes_sel = st.selectbox("Mes", _OPCIONES_MES, index=_idx_default)
+
+    if mes_sel != "Todos":
+        _dias = df_ph[df_ph["mes"] == mes_sel]["fecha_hora"].dt.day
+        _semanas_disp = sorted((((_dias - 1) // 7) + 1).unique())
+        _opciones_sem = ["Todas"] + [f"Semana {s}" for s in _semanas_disp]
+        sem_sel = st.selectbox("Semana", _opciones_sem)
+    else:
+        sem_sel = "Todas"
 
 df_ph_f  = df_ph[df_ph["mes"] == mes_sel].reset_index(drop=True)   if mes_sel != "Todos" else df_ph.copy()
 df_dqo_f = df_dqo[df_dqo["mes"] == mes_sel].reset_index(drop=True) if mes_sel != "Todos" else df_dqo.copy()
+
+if sem_sel != "Todas":
+    _n = int(sem_sel.split()[-1])
+    df_ph_f  = df_ph_f[((df_ph_f["fecha_hora"].dt.day  - 1) // 7 + 1) == _n].reset_index(drop=True)
+    df_dqo_f = df_dqo_f[((df_dqo_f["fecha"].dt.day - 1) // 7 + 1) == _n].reset_index(drop=True)
 
 # ============================================================
 # TABS PRINCIPALES
@@ -150,40 +190,65 @@ with tab_ph:
 # TAB DQO
 # ============================================================
 with tab_dqo:
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Reactor Bio — Máx. (mg/L)", f"{df_dqo_f['DQO_reactor_bio'].max():.1f}")
-    col2.metric("Reactor Bio — Mín. (mg/L)", f"{df_dqo_f['DQO_reactor_bio'].min():.1f}")
-    col3.metric("Vertimiento — Máx. (mg/L)", f"{df_dqo_f['DQO_vertimiento'].max():.1f}")
-    col4.metric("Vertimiento — Mín. (mg/L)", f"{df_dqo_f['DQO_vertimiento'].min():.1f}")
-
-    exc_reactor = int((df_dqo_f["DQO_reactor_bio"] >= DQO_LIMITE).sum())
-    exc_vert = int((df_dqo_f["DQO_vertimiento"] >= DQO_LIMITE).sum())
-    col5, col6 = st.columns(2)
     n_dias = len(df_dqo_f)
-    col5.metric("Días sobre límite — Reactor", f"{exc_reactor} / {n_dias} ({exc_reactor / n_dias * 100:.1f}%)")
-    col6.metric("Días sobre límite — Vert.", f"{exc_vert} / {n_dias} ({exc_vert / n_dias * 100:.1f}%)")
+
+    # Fichas Máx / Mín — todas las series
+    _cols_mm = st.columns(len(SERIES_DQO) * 2)
+    for i, (col_key, cfg) in enumerate(SERIES_DQO.items()):
+        _cols_mm[i * 2].metric(f"{cfg['label']} — Máx. (mg/L)", f"{df_dqo_f[col_key].max():.1f}")
+        _cols_mm[i * 2 + 1].metric(f"{cfg['label']} — Mín. (mg/L)", f"{df_dqo_f[col_key].min():.1f}")
+
+    # Fichas Días sobre límite — solo series con restricción normativa
+    _reg = {k: v for k, v in SERIES_DQO.items() if v["limite"] is not None}
+    if _reg:
+        _cols_reg = st.columns(len(_reg))
+        for i, (col_key, cfg) in enumerate(_reg.items()):
+            _exc = int((df_dqo_f[col_key] >= cfg["limite"]).sum())
+            _cols_reg[i].metric(
+                f"Días sobre límite — {cfg['label']} ({cfg['norma']})",
+                f"{_exc} / {n_dias} ({_exc / n_dias * 100:.1f}%)",
+            )
 
     st.divider()
 
-    # Gráfica de línea — ambos puntos en el mismo canvas
-    fig_dqo_line = go.Figure()
-    fig_dqo_line.add_trace(go.Scatter(
-        x=df_dqo_f["fecha"], y=df_dqo_f["DQO_reactor_bio"],
-        mode="lines+markers",
-        line=dict(color=COLOR_REACTOR, width=2), marker=dict(size=5),
-        name="Reactor Biológico",
-    ))
-    fig_dqo_line.add_trace(go.Scatter(
-        x=df_dqo_f["fecha"], y=df_dqo_f["DQO_vertimiento"],
-        mode="lines+markers",
-        line=dict(color=COLOR_VERT, width=2), marker=dict(size=5),
-        name="Vertimiento",
-    ))
-    fig_dqo_line.add_hline(
-        y=DQO_LIMITE, line_dash="dash", line_color="red",
-        annotation_text="Límite máx. Res. 0631/2015 (700 mg/L)",
-        annotation_position="top right",
+    # Gráfica de barras agrupadas — todas las series
+    fig_dqo_bar = go.Figure()
+    for col_key, cfg in SERIES_DQO.items():
+        fig_dqo_bar.add_trace(go.Bar(
+            x=df_dqo_f["fecha"], y=df_dqo_f[col_key],
+            name=cfg["label"], marker_color=cfg["color"],
+        ))
+    for col_key, cfg in SERIES_DQO.items():
+        if cfg["limite"] is not None:
+            fig_dqo_bar.add_hline(
+                y=cfg["limite"], line_dash="dash", line_color="red",
+                annotation_text=cfg["norma"], annotation_position="top left",
+            )
+    fig_dqo_bar.update_layout(
+        barmode="group", height=280,
+        margin=dict(l=20, r=20, t=10, b=40),
+        xaxis=dict(tickformat="%d %b"),
+        yaxis=dict(title="DQO (mg/L)", range=[100, 1100]),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
     )
+    st.plotly_chart(fig_dqo_bar, use_container_width=True)
+
+    # Gráfica de línea — todas las series
+    fig_dqo_line = go.Figure()
+    for col_key, cfg in SERIES_DQO.items():
+        fig_dqo_line.add_trace(go.Scatter(
+            x=df_dqo_f["fecha"], y=df_dqo_f[col_key],
+            mode="lines+markers",
+            line=dict(color=cfg["color"], width=2), marker=dict(size=6),
+            name=cfg["label"],
+        ))
+    for col_key, cfg in SERIES_DQO.items():
+        if cfg["limite"] is not None:
+            fig_dqo_line.add_hline(
+                y=cfg["limite"], line_dash="dash", line_color="red",
+                annotation_text=f"Límite máx. {cfg['norma']} ({cfg['limite']:.0f} mg/L)",
+                annotation_position="top right",
+            )
     fig_dqo_line.update_layout(
         xaxis=dict(title="Fecha", tickformat="%d %b"),
         yaxis=dict(title="DQO (mg/L)", range=[100, 1100]),
@@ -193,73 +258,42 @@ with tab_dqo:
     )
     st.plotly_chart(fig_dqo_line, use_container_width=True)
 
-    # Gráfica de barras agrupadas
-    fig_dqo_bar = go.Figure()
-    fig_dqo_bar.add_trace(go.Bar(
-        x=df_dqo_f["fecha"], y=df_dqo_f["DQO_reactor_bio"],
-        name="Reactor Biológico", marker_color=COLOR_REACTOR,
-    ))
-    fig_dqo_bar.add_trace(go.Bar(
-        x=df_dqo_f["fecha"], y=df_dqo_f["DQO_vertimiento"],
-        name="Vertimiento", marker_color=COLOR_VERT,
-    ))
-    fig_dqo_bar.add_hline(y=DQO_LIMITE, line_dash="dash", line_color="red")
-    fig_dqo_bar.update_layout(
-        barmode="group", height=280,
-        margin=dict(l=20, r=20, t=10, b=40),
-        xaxis=dict(tickformat="%d %b"),
-        yaxis=dict(range=[100, 1100]),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-    )
-    st.plotly_chart(fig_dqo_bar, use_container_width=True)
+    st.divider()
+
+    # Tablas de excedencias — solo series con restricción normativa
+    if _reg:
+        _cols_exc = st.columns(len(_reg))
+        for i, (col_key, cfg) in enumerate(_reg.items()):
+            with _cols_exc[i]:
+                st.markdown(f"**Días ≥ {cfg['limite']:.0f} mg/L — {cfg['label']} ({cfg['norma']})**")
+                df_exc = df_dqo_f[df_dqo_f[col_key] >= cfg["limite"]].copy()
+                if df_exc.empty:
+                    st.success(f"Ningún día superó el límite en {cfg['label']}.")
+                else:
+                    df_show = df_exc[["fecha", col_key, "mes"]].copy()
+                    df_show["fecha"] = df_show["fecha"].dt.strftime("%d/%m/%Y")
+                    df_show.columns = ["Fecha", "DQO (mg/L)", "Mes"]
+                    st.dataframe(
+                        df_show.style.format({"DQO (mg/L)": "{:.1f}"}).set_properties(
+                            **{"background-color": cfg["bg_exc"], "color": "#000000"}
+                        ),
+                        use_container_width=True, hide_index=True,
+                    )
 
     st.divider()
 
-    col_t1, col_t2 = st.columns(2)
-
-    with col_t1:
-        st.markdown("**🟣 Reactor Biológico — Días ≥ 700 mg/L**")
-        df_exc_reactor = df_dqo_f[df_dqo_f["DQO_reactor_bio"] >= DQO_LIMITE].copy()
-        if df_exc_reactor.empty:
-            st.success("Ningún día superó el límite en el Reactor Biológico.")
-        else:
-            df_show = df_exc_reactor[["fecha", "DQO_reactor_bio", "mes"]].copy()
-            df_show["fecha"] = df_show["fecha"].dt.strftime("%d/%m/%Y")
-            df_show.columns = ["Fecha", "DQO Reactor (mg/L)", "Mes"]
-            st.dataframe(
-                df_show.style.format({"DQO Reactor (mg/L)": "{:.1f}"}).set_properties(
-                    **{"background-color": "#EDE7F6", "color": "#000000"}
-                ),
-                use_container_width=True, hide_index=True,
-            )
-
-    with col_t2:
-        st.markdown("**🟠 Vertimiento — Días ≥ 700 mg/L (Res. 0631/2015)**")
-        df_exc_vert_dqo = df_dqo_f[df_dqo_f["DQO_vertimiento"] >= DQO_LIMITE].copy()
-        if df_exc_vert_dqo.empty:
-            st.success("Ningún día superó el límite en el Vertimiento.")
-        else:
-            df_show = df_exc_vert_dqo[["fecha", "DQO_vertimiento", "mes"]].copy()
-            df_show["fecha"] = df_show["fecha"].dt.strftime("%d/%m/%Y")
-            df_show.columns = ["Fecha", "DQO Vertimiento (mg/L)", "Mes"]
-            st.dataframe(
-                df_show.style.format({"DQO Vertimiento (mg/L)": "{:.1f}"}).set_properties(
-                    **{"background-color": "#FFCDD2", "color": "#000000"}
-                ),
-                use_container_width=True, hide_index=True,
-            )
-
-    st.divider()
-
+    # Tabla completa de valores
     st.subheader("Tabla de valores — DQO")
-    df_dqo_tabla = df_dqo_f[["fecha", "DQO_reactor_bio", "DQO_vertimiento", "mes"]].copy()
+    _cols_t = ["fecha"] + list(SERIES_DQO.keys()) + ["mes"]
+    df_dqo_tabla = df_dqo_f[_cols_t].copy()
     df_dqo_tabla["fecha"] = df_dqo_tabla["fecha"].dt.strftime("%d/%m/%Y")
-    df_dqo_tabla.columns = ["Fecha", "DQO Reactor Bio (mg/L)", "DQO Vertimiento (mg/L)", "Mes"]
+    df_dqo_tabla.columns = (
+        ["Fecha"] + [f"{cfg['label']} (mg/L)" for cfg in SERIES_DQO.values()] + ["Mes"]
+    )
     st.dataframe(
-        df_dqo_tabla.style.format({
-            "DQO Reactor Bio (mg/L)": "{:.1f}",
-            "DQO Vertimiento (mg/L)": "{:.1f}",
-        }),
+        df_dqo_tabla.style.format(
+            {f"{cfg['label']} (mg/L)": "{:.1f}" for cfg in SERIES_DQO.values()}
+        ),
         use_container_width=True, hide_index=True,
     )
 
@@ -278,14 +312,16 @@ with tab_datos:
 
     st.divider()
 
-    st.subheader("Mediciones de DQO — diarias")
-    df_dqo_tabla2 = df_dqo_f[["fecha", "DQO_reactor_bio", "DQO_vertimiento", "mes"]].copy()
+    st.subheader("Mediciones de DQO — 4 días/semana")
+    _cols_t2 = ["fecha"] + list(SERIES_DQO.keys()) + ["mes"]
+    df_dqo_tabla2 = df_dqo_f[_cols_t2].copy()
     df_dqo_tabla2["fecha"] = df_dqo_tabla2["fecha"].dt.strftime("%d/%m/%Y")
-    df_dqo_tabla2.columns = ["Fecha", "DQO Reactor Bio (mg/L)", "DQO Vertimiento (mg/L)", "Mes"]
+    df_dqo_tabla2.columns = (
+        ["Fecha"] + [f"{cfg['label']} (mg/L)" for cfg in SERIES_DQO.values()] + ["Mes"]
+    )
     st.dataframe(
-        df_dqo_tabla2.style.format({
-            "DQO Reactor Bio (mg/L)": "{:.1f}",
-            "DQO Vertimiento (mg/L)": "{:.1f}",
-        }),
+        df_dqo_tabla2.style.format(
+            {f"{cfg['label']} (mg/L)": "{:.1f}" for cfg in SERIES_DQO.values()}
+        ),
         use_container_width=True, hide_index=True,
     )

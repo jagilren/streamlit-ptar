@@ -35,7 +35,7 @@ SERIES_DQO = {
     },
 }
 
-st.title("💧 Dashboard PTAR — pH y DQO")
+st.title("💧 Dashboard PTAR")
 st.markdown("Monitoreo de parámetros de calidad de agua · 2026")
 st.divider()
 
@@ -74,7 +74,7 @@ if sem_sel != "Todas":
 # ============================================================
 # TABS PRINCIPALES
 # ============================================================
-tab_ph, tab_dqo, tab_datos = st.tabs(["🔵 pH", "🟠 DQO (mg/L)", "📋 Datos"])
+tab_ph, tab_dqo, tab_datos = st.tabs( "🟠 DQO (mg/L)",["🔵 pH", "📋 Datos"])
 
 # ============================================================
 # TAB pH

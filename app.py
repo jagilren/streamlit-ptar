@@ -48,17 +48,15 @@ with tab_ph:
     col3.metric("Vertimiento — Máx.", f"{df_ph_f['pH_vertimiento'].max():.2f}")
     col4.metric("Vertimiento — Mín.", f"{df_ph_f['pH_vertimiento'].min():.2f}")
 
-    col5, col6, col7, col8 = st.columns(4)
-    col5.metric("Serpentín DAF — Prom.", f"{df_ph_f['pH_serpetin_daf'].mean():.2f}")
     exc_daf = int(
         ((df_ph_f["pH_serpetin_daf"] < PH_MIN) | (df_ph_f["pH_serpetin_daf"] > PH_MAX)).sum()
     )
-    col6.metric("Mediciones fuera de rango — DAF", f"{exc_daf} / {n_med}")
-    col7.metric("Vertimiento — Prom.", f"{df_ph_f['pH_vertimiento'].mean():.2f}")
     exc_vert_ph = int(
         ((df_ph_f["pH_vertimiento"] < PH_MIN) | (df_ph_f["pH_vertimiento"] > PH_MAX)).sum()
     )
-    col8.metric("Mediciones fuera de rango — Vert.", f"{exc_vert_ph} / {n_med}")
+    col5, col6 = st.columns(2)
+    col5.metric("Mediciones fuera de rango — DAF", f"{exc_daf} / {n_med} ({exc_daf / n_med * 100:.1f}%)")
+    col6.metric("Mediciones fuera de rango — Vert.", f"{exc_vert_ph} / {n_med} ({exc_vert_ph / n_med * 100:.1f}%)")
 
     st.divider()
 
@@ -158,13 +156,12 @@ with tab_dqo:
     col3.metric("Vertimiento — Máx. (mg/L)", f"{df_dqo_f['DQO_vertimiento'].max():.1f}")
     col4.metric("Vertimiento — Mín. (mg/L)", f"{df_dqo_f['DQO_vertimiento'].min():.1f}")
 
-    col5, col6, col7, col8 = st.columns(4)
-    col5.metric("Reactor Bio — Prom. (mg/L)", f"{df_dqo_f['DQO_reactor_bio'].mean():.1f}")
     exc_reactor = int((df_dqo_f["DQO_reactor_bio"] >= DQO_LIMITE).sum())
-    col6.metric("Días sobre límite — Reactor", exc_reactor)
-    col7.metric("Vertimiento — Prom. (mg/L)", f"{df_dqo_f['DQO_vertimiento'].mean():.1f}")
     exc_vert = int((df_dqo_f["DQO_vertimiento"] >= DQO_LIMITE).sum())
-    col8.metric("Días sobre límite — Vert.", exc_vert)
+    col5, col6 = st.columns(2)
+    n_dias = len(df_dqo_f)
+    col5.metric("Días sobre límite — Reactor", f"{exc_reactor} / {n_dias} ({exc_reactor / n_dias * 100:.1f}%)")
+    col6.metric("Días sobre límite — Vert.", f"{exc_vert} / {n_dias} ({exc_vert / n_dias * 100:.1f}%)")
 
     st.divider()
 

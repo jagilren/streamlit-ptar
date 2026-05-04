@@ -9,8 +9,8 @@ def generar_datos() -> tuple[pd.DataFrame, pd.DataFrame]:
     fechas_ph = pd.date_range("2026-05-01", "2026-06-30 23:30", freq="30min")
     n_ph = len(fechas_ph)
 
-    ph_serpetin_daf = np.clip(np.random.normal(loc=7.0, scale=0.9, size=n_ph), 4.0, 11.0)
-    ph_vertimiento  = np.clip(np.random.normal(loc=7.2, scale=0.8, size=n_ph), 4.0, 11.0)
+    ph_serpetin_daf = np.clip(np.random.normal(loc=8.5, scale=0.5, size=n_ph), 6.0, 11.0)
+    ph_vertimiento  = np.clip(np.random.normal(loc=7.2, scale=0.4, size=n_ph), 5.5, 9.0)
 
     df_ph = pd.DataFrame({
         "fecha_hora":      fechas_ph,

@@ -31,7 +31,7 @@ def generar_datos() -> tuple[pd.DataFrame, pd.DataFrame]:
     fechas_dqo = pd.DatetimeIndex(sorted(_dias_sel))
     n_dqo      = len(fechas_dqo)
 
-    dqo_reactor     = np.clip(np.random.normal(loc=570, scale=160, size=n_dqo), 300, 950)
+    dqo_reactor     = np.clip(np.random.normal(loc=700, scale=160, size=n_dqo), 400, 1050)
     dqo_vertimiento = np.clip(np.random.normal(loc=400, scale=140, size=n_dqo), 180, 780)
 
     df_dqo = pd.DataFrame({

@@ -1,44 +1,114 @@
 import pandas as pd
-import numpy as np
+import streamlit as st
+from config import CSV_PATH, CSV_PATH_LAB
+
+_MESES_ES = {
+    1: "Enero",    2: "Febrero",   3: "Marzo",     4: "Abril",
+    5: "Mayo",     6: "Junio",     7: "Julio",      8: "Agosto",
+    9: "Septiembre", 10: "Octubre", 11: "Noviembre", 12: "Diciembre",
+}
+
+_MAX_POR_HORA = 60
 
 
-def generar_datos() -> tuple[pd.DataFrame, pd.DataFrame]:
-    np.random.seed(42)
+def _mes_str(ts: pd.Timestamp) -> str:
+    return f"{_MESES_ES[ts.month]} {ts.year}"
 
-    # ── pH: 48 mediciones/día (cada 30 min) ──────────────────────────────
-    fechas_ph = pd.date_range("2026-05-01", "2026-06-30 23:30", freq="30min")
-    n_ph = len(fechas_ph)
 
-    ph_serpetin_daf = np.clip(np.random.normal(loc=8.5, scale=0.5, size=n_ph), 6.0, 11.0)
-    ph_vertimiento  = np.clip(np.random.normal(loc=7.2, scale=0.4, size=n_ph), 5.5, 9.0)
+def _seek(fuente) -> None:
+    if hasattr(fuente, "seek"):
+        fuente.seek(0)
 
-    df_ph = pd.DataFrame({
-        "fecha_hora":      fechas_ph,
-        "pH_serpetin_daf": ph_serpetin_daf.round(2),
-        "pH_vertimiento":  ph_vertimiento.round(2),
-        "mes": np.where(fechas_ph < pd.Timestamp("2026-06-01"), "Mayo 2026", "Junio 2026"),
-    })
 
-    # ── DQO: 4 mediciones aleatorias por semana ───────────────────────────
-    _todas = pd.date_range("2026-05-01", "2026-06-30", freq="D")
-    _rng   = np.random.default_rng(seed=99)   # RNG independiente del pH
+def _leer_df(fuente) -> pd.DataFrame:
+    """Lee y normaliza un CSV en formato largo (TimeStamp, TAG, Value)."""
+    _seek(fuente)
+    df = pd.read_csv(fuente, dtype={"TAG": str, "Value": float})
+    df.columns = df.columns.str.strip()
+    df["TimeStamp"] = pd.to_datetime(df["TimeStamp"])
+    df["TAG"] = df["TAG"].str.strip()
+    _seek(fuente)
+    return df
 
-    _dias_sel = []
-    for _, grp in pd.DataFrame({"fecha": _todas}).groupby(_todas.to_period("W")):
-        idx = _rng.choice(len(grp), size=min(4, len(grp)), replace=False)
-        _dias_sel.extend(grp["fecha"].iloc[sorted(idx)].tolist())
 
-    fechas_dqo = pd.DatetimeIndex(sorted(_dias_sel))
-    n_dqo      = len(fechas_dqo)
+def _downsample_hora(df: pd.DataFrame, n: int = _MAX_POR_HORA) -> pd.DataFrame:
+    """
+    Por cada (TAG, hora), conserva las n lecturas más próximas al mínimo y
+    máximo observados en esa hora. Grupos con ≤ n filas no se modifican.
+    Operación completamente vectorizada (sin apply por filas).
+    """
+    df = df.copy()
+    df["_hora"] = df["TimeStamp"].dt.floor("1h")
 
-    dqo_reactor     = np.clip(np.random.normal(loc=700, scale=160, size=n_dqo), 400, 1050)
-    dqo_vertimiento = np.clip(np.random.normal(loc=400, scale=140, size=n_dqo), 180, 780)
+    grp = df.groupby(["TAG", "_hora"])["Value"]
+    grp_min = grp.transform("min")
+    grp_max = grp.transform("max")
 
-    df_dqo = pd.DataFrame({
-        "fecha":           fechas_dqo,
-        "DQO_reactor_bio": dqo_reactor.round(1),
-        "DQO_vertimiento": dqo_vertimiento.round(1),
-        "mes": np.where(fechas_dqo < pd.Timestamp("2026-06-01"), "Mayo 2026", "Junio 2026"),
-    })
+    dist_lo = (df["Value"] - grp_min).abs()
+    dist_hi = (df["Value"] - grp_max).abs()
+    # distancia al límite dinámico más cercano: min(|v - min_hora|, |v - max_hora|)
+    df["_dist"] = dist_lo.where(dist_lo < dist_hi, dist_hi)
 
-    return df_ph, df_dqo
+    df["_rank"] = df.groupby(["TAG", "_hora"])["_dist"].rank(method="first", ascending=True)
+    df["_cnt"]  = grp.transform("count")
+
+    # Para grupos con más de n filas → quedar con los n de menor distancia.
+    # Para grupos con ≤ n filas → _cnt.clip(upper=n) == _cnt, se conservan todos.
+    keep = df["_rank"] <= df["_cnt"].clip(upper=n)
+    return df[keep].drop(columns=["_hora", "_dist", "_rank", "_cnt"]).reset_index(drop=True)
+
+
+@st.cache_data(show_spinner="Leyendo lista de TAGs…")
+def leer_tags(fuente=CSV_PATH) -> list[str]:
+    """Devuelve los TAGs únicos presentes en el CSV (columna TAG)."""
+    _seek(fuente)
+    df = pd.read_csv(fuente, usecols=["TAG"], dtype={"TAG": str})
+    _seek(fuente)
+    return sorted(df["TAG"].str.strip().unique().tolist())
+
+
+@st.cache_data(show_spinner="Cargando datos PLC (pH)…")
+def cargar_ph(fuente=CSV_PATH) -> pd.DataFrame:
+    """
+    Carga el CSV del PLC, aplica downsampling a máximo 60 lecturas/hora y
+    devuelve df_ph (fecha_hora, TAGs…, mes).
+    """
+    df = _downsample_hora(_leer_df(fuente))
+    tags = sorted(df["TAG"].unique().tolist())
+
+    if not tags:
+        return pd.DataFrame(columns=["fecha_hora", "mes"])
+
+    wide = (
+        df
+        .pivot_table(index="TimeStamp", columns="TAG", values="Value", aggfunc="mean")
+        .reset_index()
+    )
+    wide.columns.name = None
+    wide = wide.rename(columns={"TimeStamp": "fecha_hora"})
+    wide["mes"] = wide["fecha_hora"].apply(_mes_str)
+    return wide
+
+
+@st.cache_data(show_spinner="Cargando datos de laboratorio (DQO)…")
+def cargar_dqo(fuente=CSV_PATH_LAB) -> pd.DataFrame:
+    """
+    Carga el CSV de laboratorio, aplica downsampling a máximo 60 lecturas/hora y
+    devuelve df_dqo (fecha, TAGs…, mes).
+    """
+    df = _downsample_hora(_leer_df(fuente))
+    tags = sorted(df["TAG"].unique().tolist())
+
+    if not tags:
+        return pd.DataFrame(columns=["fecha", "mes"])
+
+    wide = (
+        df
+        .pivot_table(index="TimeStamp", columns="TAG", values="Value", aggfunc="mean")
+        .reset_index()
+    )
+    wide.columns.name = None
+    wide = wide.rename(columns={"TimeStamp": "fecha"})
+    wide["fecha"] = pd.to_datetime(wide["fecha"]).dt.normalize()
+    wide["mes"] = wide["fecha"].apply(_mes_str)
+    return wide
